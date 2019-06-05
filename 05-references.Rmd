@@ -1,0 +1,10 @@
+`r if (knitr::is_html_output()) '
+# References {-}
+'`
+Used packages:
+
+- @R-bookdown
+- @R-tidyverse
+- @R-caret
+- @R-stringr
+- @R-tidyr

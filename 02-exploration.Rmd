@@ -1,0 +1,426 @@
+# Data Exploration {#exploration}
+
+## Data retrieval and preparation
+In order to prapare data for building recomendation system I performed following operations: 
+
+- downloaded MovieLens 10M data file as zip-file
+- extracted necessary files
+- loaded data to data-frames (`movies` and `ratings`)
+- joined those 2 data frames into one data-frame: `movielens`
+- splited data into training (`edx`) and validation (`validation`) sets at rate 90/10.
+- tuned sets in the way that validation data set contains only 'known` users and movies (i.e. the ones that have at least one record in traing set)
+- removed spare objects enabling garbage collector to free mamory
+
+There are two modifications in my data pre-processing procedures in compare to ones published by Course Provider:
+
+- I noticed that there is year of the movie's premiere given in braces inside all the titles, like in "Toy Story (1995)". I have extracted it to seperate field: `year`, and then further factorize it as field `year_class`.
+- To reduce memory usage during processing I excluded movie titles from joined data-frame. I do not use titles during rating predictions.
+
+```{r load-libs, include=FALSE}
+knitr::opts_chunk$set(echo=FALSE)
+
+# Set following parameter to TRUE id you already downoaded data and extracted files (saves time).
+# Verify folders.
+FirstTime <- FALSE
+
+if (FirstTime) {
+  # Note: this process could take a couple of minutes
+  if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+  if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+  if(!require(captioner)) install.packages("captioner", repos = "http://cran.us.r-project.org")
+  if(!require(stringr)) install.packages("stringr", repos = "http://cran.us.r-project.org")
+  if(!require(tidyr)) install.packages("tidyr", repos = "http://cran.us.r-project.org")
+  if(!require(gridExtra)) install.packages("gridExtra", repos = "http://cran.us.r-project.org")
+}
+library(tidyverse)
+library(caret)
+library(captioner)
+library(stringr)
+library(tidyr)
+library(gridExtra)
+TABLE_CAP <- captioner(prefix = "Table")
+```
+
+```{r data-prepare, cache=TRUE, include=FALSE}
+# MovieLens 10M dataset:
+# https://grouplens.org/datasets/movielens/10m/
+# http://files.grouplens.org/datasets/movielens/ml-10m.zip
+
+if (FirstTime) {
+  dl <- tempfile()
+  download.file("http://files.grouplens.org/datasets/movielens/ml-10m.zip", dl)
+  ratings <- read.table(text = gsub("::", "\t", readLines(unzip(dl, "ml-10M100K/ratings.dat"))),
+                        col.names = c("userId", "movieId", "rating", "timestamp"))
+  movies <- str_split_fixed(readLines(unzip(dl, "ml-10M100K/movies.dat")), "\\::", 3)
+  rm(dl)
+} else {
+  ratings <- read.table(text = gsub("::", "\t", readLines("ml-10M100K/ratings.dat")),
+                        col.names = c("userId", "movieId", "rating", "timestamp"))
+  movies <- str_split_fixed(readLines("ml-10M100K/movies.dat"), "\\::", 3)
+}
+
+colnames(movies) <- c("movieId", "title", "genres")
+movies <- as.data.frame(movies) %>% mutate(movieId = as.numeric(levels(movieId))[movieId],
+                                           title = as.character(title),
+                                           genres = as.character(genres),
+                                           year = as.numeric(title %>% str_extract("\\(\\d+\\)$") %>% str_extract("\\d+")))
+#There is one movie: "1-900 (06) (1994)", so $ must be at end of regex, otherwise 06 would be extracted
+
+# There are more new movies than old ones, so let's factorize year
+clasify_year <- function(year) {
+  if (year < 1950) {return ("Very old")}
+  if (year < 1960) {return ("50's")}
+  if (year < 1970) {return ("60's")}
+  if (year < 1980) {return ("70's")}
+  if (year < 1985) {return ("early 80's")}
+  if (year < 1990) {return ("late 80's")}
+  if (year < 1995) {return ("early 90's")}
+  if (year < 2000) {return ("late 90's")}
+  if (year < 2005) {return ("early 200x's")}
+  "New"
+}
+# Necessary to properly order year class
+ylev <- sapply(min(movies$year):max(movies$year), clasify_year) %>% unique
+
+movies <- movies %>%
+  mutate(year_class = factor(sapply(year, clasify_year), levels = ylev))
+
+movielens <- left_join(ratings, movies %>% select(-title, -year), by = "movieId")
+
+# Validation set will be 10% of MovieLens data
+set.seed(1)
+test_index <- createDataPartition(y = movielens$rating, times = 1, p = 0.1, list = FALSE)
+edx <- movielens[-test_index,]
+temp <- movielens[test_index,]
+
+# Make sure userId and movieId in validation set are also in edx set
+validation <- temp %>% 
+  semi_join(edx, by = "movieId") %>%
+  semi_join(edx, by = "userId")
+
+# Add rows removed from validation set back into edx set
+removed <- anti_join(temp, validation)
+edx <- rbind(edx, removed)
+
+rm(ratings, test_index, temp, removed, movielens, ylev, clasify_year)
+```
+
+```{r include=FALSE}
+# automatically create a bib database for R packages
+knitr::write_bib(c(
+  .packages(), 'tidyverse', 'caret', 'captioner'
+), 'packages.bib')
+```
+
+## Initial analysis of training data set
+
+In this chapter I present some basic statistics and analysis of training data set performed in order to detarmine predictors that could be usable for inproving acuracy of rating prediction model which I will be building.
+
+### Global {#global-stat}
+Here is how our raw data looks like:
+```{r}
+knitr::kable(
+  head(edx),
+  caption = 'A sample of training data'
+)
+```
+
+```{r}
+mu <- mean(edx$rating)
+knitr::kable(
+  data.frame(
+    Measure = c("Number of records", "Total mean of ratings", "Levels of ratings"),
+    Value = c(as.character(nrow(edx)), as.character(mu), paste(levels(factor(edx$rating)), collapse = ", "))),
+  caption = 'Basic characteristics of our traing data set'
+)
+edx_min <- min(edx$rating)
+edx_max <- max(edx$rating)
+```
+
+```{r ratings-dist, fig.cap='Histogram of ratings distribution'}
+edx %>% 
+  ggplot(aes(rating)) +
+  geom_histogram(aes(y = stat(count / sum(count))), breaks = seq(0, 5, 0.5)) + 
+  xlab("Rating") + ylab("Frequency") +
+  ggtitle('Histogram of ratings distribution')
+```
+The distribution of ratings is not symmetrical. The value "4" as most frequent one and whole values are more frequent than fractions. Also distrubution of fraction-only values seems to be similar to distribution of whole values. 
+This means that when we will be rounding predictions from floating values colculated by model to levels of actual ratings (which are in 0.5 steps) we will get better results if we take into consideration this fraction vs. whole disproportion instead of just simply rounding to nearest half-fraction values.
+
+```{r}
+rank_counts <- edx %>%
+  group_by(rating) %>%
+  summarize(cnt = n())
+count_tot <- sum(rank_counts$cnt) # == nrow(edx)
+count_halfs <- sum(rank_counts %>% filter(rating != round(rating)) %>% .$cnt)
+frac_halfs <- count_halfs / count_tot
+thres_halfs <- 0.5 * frac_halfs * 2
+```
+The fraction of half-stars in all ratings is equal: `r frac_halfs`.
+
+### By Generics
+Generics assigned to movies were not extensivly used in example models provided during the course.
+My intuition was that it may play some substantial role when users are rating movies. So I decided to extract
+indivudual generics from combined vector attached to every movie and create ratings distribution historgam
+for every generic.
+
+```{r exploration-by-gen1, cache=TRUE, fig.cap='Histogram of ratings distributions by generics'}
+generics <-
+  edx %>%
+  distinct(genres) %>%
+  mutate(genresv = str_split(genres, "\\|", simplify = F)) %>%
+  .$genresv %>%
+  unlist %>%
+  unique
+generics <- generics[generics != "(no genres listed)"]
+
+gens <- bind_rows(lapply(generics, function(gen) {
+  edx %>%
+    filter(str_detect(genres, gen)) %>%
+    mutate(gen = gen) %>%
+    select(-timestamp, -genres, -year_class)
+}))
+gens <- gens %>% mutate(gen = factor(gen))
+
+gens %>% 
+  ggplot(aes(rating)) +
+  geom_histogram(aes(y = stat(ncount)), breaks = seq(0, 5)) +
+  xlab("Rating") + ylab("Relative Count") +
+  facet_wrap(~gen) +
+  ggtitle('Histogram of ratings distributions by generics')
+```
+To make smaller histograms more clear, I made two changes in compare to previous histogram:
+
+- ratings on histograms are groupped to whole values
+- y-dimension is calculated in the way that highest bar is scalled to 1 and others are relative to it. In this way all are readable independently on number of actual ratings within each category.
+
+For all catagories, the most frequent rating is "4", but there are slight differencies when we look at hights of "3" and "5" bars
+(conpare for instance "Film-Noir" and "Horror").
+Because this chart hides information about ratings counts in each catagory, I decided to do one more graph that shows this information and also how much avarage rating for each category diverge from total ratings avarage (marked below with red line).
+
+```{r exploration-by-gen2, cache=TRUE, fig.cap='Mean ratings by generics'}
+gen_stat <- gens %>%
+  group_by(gen) %>%
+  summarize(count = n(), mean = mean(rating), sdev = sd(rating))
+
+gen_stat %>% 
+  ggplot(aes(gen, mean)) + 
+  scale_y_continuous(limits = c(0, 5)) +
+  geom_point(aes(size = count)) +
+  geom_errorbar(aes(ymin = mean-sdev, ymax = mean+sdev), width = 0.5) +
+  geom_hline(yintercept = mu, col = "red") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  xlab("") + ylab("Rating Avarage") +
+  ggtitle('Mean ratings by generics')
+```
+This chart shows that mean ratings in each category (espacially those more popular) does not differ that much from total mean,
+and also that variability within each generics is pretty much the same.
+
+This little surpriced me bacause I expected that assigned rating is more related to generics (kind of movie).
+However after I thought a little, I realized that this was my auto-suggestion. I.e. I, most probably subconsciously expected that people (generally ?!?) like kind of movies that I personally like. 
+But people are different and like different films. Otherwise it could happen that some movie catagories would dominate industry. Kind of interesting discovery. 
+The other observation is that some kind of movies are in average higher rated that others, but are in the same time relatively rare - what could maybe be some pointer for producers.
+The last thing which is little strange are the extremas: "Film-Noir" - highest rated and "Horror" - lowest rated, while they are in my humble opinion a little bit similar in its nature. So there may be some different factor which influance the rating.
+
+### By Generics and Users {#by-gen-users-stat}
+Following my findings described in prevoius section - that different users may like different kinds of movies I would like to check
+if it is visible in the data.
+
+```{r exploration-by-gen-user-m, cache=TRUE, message=FALSE, fig.cap='Distribution of rating means for users by generics'}
+gen_stat2_limit <- 5
+gen_stat2 <- gen_stat %>%
+  mutate(mean_gen = mean, sdev_gen = sdev) %>%
+  select(gen, mean_gen, sdev_gen)
+ugen_stat <- gens %>%
+  group_by(gen, userId) %>%
+  summarize(count = n(), mean = mean(rating), sdev = sd(rating))
+ugen_stat %>% 
+  filter(count > gen_stat2_limit) %>%
+  left_join(gen_stat2, by = "gen") %>%
+  ggplot(aes(mean)) +
+  geom_histogram() +
+#  geom_vline(aes(xintercept = mean_gen), col = "blue") +
+  xlab("Rating Mean by User") + ylab("Count") +
+  facet_wrap(~gen) +
+  ggtitle('Distribution of rating means for users by generics')
+```
+Below and next charts only take into consideration users, which rated at least `r gen_stat2_limit+1` movies within particular category. Total avarages for each generic are shown on chart \@ref(fig:exploration-by-gen2).
+All distributions are more-less symetrical and looks normally. They are also not very steep, what means (???) that users are watching and rating movies from different categories.
+
+```{r exploration-by-gen-user-sd, cache=TRUE, message=FALSE, fig.cap="Distribution of ratings' standard deviation for users by generics"}
+ugen_stat %>% 
+  filter(count > gen_stat2_limit) %>%
+  left_join(gen_stat2, by = "gen") %>%
+  ggplot(aes(sdev)) +
+  geom_histogram() +
+#  geom_vline(xintercept = sd_edx, col = "red") +
+  geom_vline(aes(xintercept = sdev_gen), col = "red") +    # sdev of ratings for entire generic (bigger than blue)
+  geom_vline(aes(xintercept = mean(sdev)), col = "blue") + # mean sdev of ratings for one user by generic
+  xlab("Rating Standard Deviation by User") + ylab("Count") +
+  facet_wrap(~gen) +
+  ggtitle("Distribution of ratings' standard deviation for users by generics")
+ugen_mstdev <- mean(
+  ugen_stat %>% 
+  filter(count > gen_stat2_limit) %>%
+  summarize(mstdev = mean(sdev)) %>%
+  .$mstdev)
+# 0.8664984
+```
+The lines on above chart have following menaing:
+
+- red: common standard deviation of ratings for each category (also shown as error bars in chart \@ref(fig:exploration-by-gen2))
+- blue: average standard deviation of ratings of one user for each category
+
+Total standard deviation of all ratings is equal: `r ugen_mstdev`.
+
+All distributions are slightly asymetrically shifted to left, and in all cases the blue line is at left side of red.
+This means that ratings within each category are less variable for particular users than generally. This mens that 
+movie generic togather with user ID may bring some information into the expected rating. So it may be sensible to 
+take this factor into consideration in the prediction model.
+
+```{r clear-by-generics-data, include=FALSE}
+rm(gen_stat, gen_stat2, gen_stat2_limit, gens, ugen_stat, ugen_mstdev, rank_counts)
+```
+
+### By Year {#by-year-stat}
+Lets repeat similar analysis and try to use `year` data.
+
+```{r year-counts-dist, message=FALSE, fig.cap='Number of movies in particular years'}
+movies %>%
+  ggplot(aes(year)) +
+  geom_histogram(aes(y = stat(count))) + 
+  xlab("Year") + ylab("Count") +
+  ggtitle("Number of movies in particular years")
+```
+As expected year of movie production is distributed not evenly. So it may be hard to use raw year number in prediction model.
+So I revised initial data pre-processing routines and added factorized year class (years groped by 10 or 5 - further called "epoch") instead of raw year.
+
+Here is my groupping function:
+```{r, eval=FALSE, echo=TRUE}
+clasify_year <- function(year) {
+  if (year < 1950) {return ("Very old")}
+  if (year < 1960) {return ("50's")}
+  if (year < 1970) {return ("60's")}
+  if (year < 1980) {return ("70's")}
+  if (year < 1985) {return ("early 80's")}
+  if (year < 1990) {return ("late 80's")}
+  if (year < 1995) {return ("early 90's")}
+  if (year < 2000) {return ("late 90's")}
+  if (year < 2005) {return ("early 200x's")}
+  "New"
+}
+```
+After this change information about production year of movies is more evenly distributed.
+
+```{r yearclass-counts-dist, warning=FALSE, fig.cap='Number of movies in particular epoch'}
+movies %>%
+  ggplot(aes(year_class)) +
+  geom_histogram(stat="count") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  xlab("Year Class") + ylab("Count") +
+  ggtitle("Number of movies in particular epoch")
+```
+Let's create chart similar to \@ref(fig:exploration-by-gen2)), but which will show how rating is changing for particular epochs. As on refered graph, red line marks total rating avarage.
+
+```{r exploration-by-yearcl, cache=TRUE, fig.cap='Mean ratings by epoch'}
+yc_stat <- edx %>%
+  group_by(year_class) %>%
+  summarize(count = n(), mean = mean(rating), sdev = sd(rating))
+yc_stat %>%
+  ggplot(aes(year_class, mean)) + 
+  scale_y_continuous(limits = c(0, 5)) +
+  geom_point(aes(size = count)) +
+  geom_errorbar(aes(ymin = mean-sdev, ymax = mean+sdev), width = 0.5) +
+  geom_hline(yintercept = mu, col = "red") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  xlab("") + ylab("Rating Avarage") +
+  ggtitle("Mean ratings by epoch")
+```
+Note that counts on this and previous chart are for different entities. On chart \@ref(fig:yearclass-counts-dist)) count refers to *number of movies* in each epoch, while on above chart count stands for *number of ratings* of movie of particular epoch.
+It is evident from this chart that older movies tends to be rated higher, but in the same time they are also far less frequent. So total impact of epoch in correct prediction may not be that big. 
+So I decided to continue analysis and check if maybe some users likes more movies from certain epoch.
+
+### By Year and User {#by-year-users-stat}
+```{r exploration-by-epoch-user-m, cache=TRUE, message=FALSE, fig.cap='Distribution of rating means for users by epoch'}
+stat_limit <- 5
+yc_stat2 <- yc_stat %>%
+  mutate(mean_yc = mean, sdev_yc = sdev) %>%
+  select(year_class, mean_yc, sdev_yc)
+uyc_stat <- edx %>%
+  group_by(year_class, userId) %>%
+  summarize(count = n(), mean = mean(rating), sdev = sd(rating))
+uyc_stat %>% 
+  filter(count > stat_limit) %>%
+  left_join(yc_stat2, by = "year_class") %>%
+  ggplot(aes(mean)) +
+  geom_histogram() +
+  xlab("Rating Mean by User") + ylab("Count") +
+  facet_wrap(~year_class) +
+  ggtitle("Distribution of rating means for users by epoch")
+```
+Below and next charts only take into consideration users, which rated at least `r stat_limit+1` movies within particular epoch.
+Distributions of youngest movies are more-less symetrical and looks normally, while older ones are little shifted to right.
+
+```{r exploration-by-epoch-user-sd, cache=TRUE, message=FALSE, fig.cap="Distribution of ratings' standard deviation for users by epoch"}
+uyc_stat %>% 
+  filter(count > stat_limit) %>%
+  left_join(yc_stat2, by = "year_class") %>%
+  ggplot(aes(sdev)) +
+  geom_histogram() +
+  geom_vline(aes(xintercept = sdev_yc), col = "red") +     # sdev of ratings for entire epoch (bigger than blue)
+  geom_vline(aes(xintercept = mean(sdev)), col = "blue") + # mean sdev of ratings for one user by epoch
+  xlab("Rating Standard Deviation by User") + ylab("Count") +
+  facet_wrap(~year_class) +
+  ggtitle("Distribution of ratings' standard deviation for users by epoch")
+```
+The lines on above chart have following menaing:
+
+- red: common standard deviation of ratings for each epoch (also shown as error bars in chart \@ref(fig:exploration-by-yearcl))
+- blue: average standard deviation of ratings of one user for each epoch
+
+All distributions are slightly asymetrically shifted to left. For older movies the blue line is close to red one, but 
+for more frequently rated movies there is slight difference and standard deviation per user is smaller that common one.
+This mens that movie epoch togather with user ID may bring some information into the expected rating. So it may be sensible to take this factor into consideration in the prediction model.
+
+### Fractional Ratings
+We have seen in Global Statistics section (\@ref(global-stat)) that users tend to give whole stars ratings more then half-stars, but does this depends on particular users? Let's check this.
+
+```{r half-stars-analysis, cache=TRUE, message=FALSE, fig.cap="The fraction of half-stars given by different users"}
+rfrac_counts <- edx %>%
+  filter(rating != round(rating)) %>%
+  group_by(userId) %>%
+  summarize(rfrac = n())
+
+r_counts <- edx %>%
+  group_by(userId) %>%
+  summarize(rtot = n()) %>%
+  filter(rtot > stat_limit) %>%
+  left_join(rfrac_counts, by = "userId") %>%
+  mutate(rfrac = ifelse(is.na(rfrac), 0, rfrac)) %>%
+  mutate(halfs = round(rfrac / rtot, 2)) %>%
+  select(-rtot, -rfrac)
+
+r_counts %>% 
+  ggplot(aes(halfs)) +
+  geom_histogram() +
+  geom_vline(aes(xintercept = frac_halfs), col = "red") + 
+  xlab("Fraction of half-stars") + ylab("Count of users") +
+  ggtitle("The fraction of half-stars given by different users")
+```
+Red line marks total half-star frequency. 
+
+This chart shows that users are divided into two separate groups:
+
+- those who never use half stars
+- those who give half-star ratings with randon (close to 0.5) frequency
+
+This is interesting observation and can highly improve prediction acuracy of our model.
+
+```{r include=FALSE}
+# automatically create a bib database for R packages
+knitr::write_bib(c(
+  .packages(), 'stringr', 'tidyr'
+), 'packages.bib')
+rm(uyc_stat, yc_stat, yc_stat2, yearcl_stat, stat_limit, rfrac_counts, r_counts)
+# Preserved: edx, validation, movies, r_counts
+```

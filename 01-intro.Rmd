@@ -1,0 +1,41 @@
+# Introduction {#intro}
+
+## Problem definition {#problemdef}
+
+This report ia a required document for the final part of _Data Science Professional Certificate Program_ provided by HarwardX [@EdX-Capstone]. The excercise consist in creating a program (also called a model) which can predict a rating which particular user
+most probably would assign to parcicular not yet watched movie, based on their historical ratings for other movies or other users' ratings of this movie.
+
+In practice we will use data set provided by _GroupLens research lab_ [@SourceData] which contains 10 million ratings applied to 10,681 movies by 71,567 users. Data set was randomly split into two separate sets: training set (refered in later code as `edx`) - about 90% of data, and validation set (`validation` in code) - 10% of data. In addition splitting algorithm ensured that all users and movies
+contained in validation set have some data in training set. Training set was used to develop the rating prediction program and tune its
+parameters. Validation set was apparently used to check how good is particular version of program (the model) - i.e. it was only used to
+select the best model (the one nominated as final solution in section \@ref(final-model) ) among developed models. I honor the rule that
+none of validation set data can affect on any algorithms or internal parameters of any considered model.
+
+The goal of excercise is to develop program which will calculate ratings equal or as close as possible to real ratings given by users.
+In practice, to measure (rate) concrete program - we will let it to calculate ratings for users and movies contained in validation set
+and compare those values with ratings stored in validation set. According rules established by Course Vendor the value of RMSE 
+(root mean squared error) is considered as measure of how predictions are close to real values (the _loss function_). It is defined as:
+
+$$\text{RMSE} = \sqrt{\frac{1}{N}\sum_{i=1}^{N}(\hat{y}_i - y_i)^2}$$
+
+Where $N$ is number of records in validation set, $\hat{y}$ is predicted value and $y$ is real value in validation set.
+So I will be trying to minimize this function. Values below 0.87 are considered as good by Course Vendor.
+In addition to this basic measure, I will be also calculating an overall accuracy as second, helper measure. It is defined as:
+
+$$\text{ACCU} = \frac{\text{number of exact predictions}}{\text{number of all predictions}}$$
+
+In many places in this report I will be using modified code from [@IrizarryBook]. Because this is basic book for entire _Data Science  Series Program_ I will refrain from citing this book at every place in following text.
+
+## Work plan
+
+Before I started working on problem I had following rough plan.
+
+1. At first try to use basic technicks like movie and user effect and see what results they bring.
+2. Then try to use additional information given in data files not explicitly used in the course and book material - like
+   movie genres and movie year of issue (embedded in most movie titles).
+3. Than, to check if regularization and introducing panalties shrinking less popular moviews to average would have
+   any positive effect.
+4. Then, would see if more advanced technics like matrix factoirization could be applied to our problem. I suspect that there could be
+   performance of memory problems with such relativly big data set, whole working on personal PC.
+5. Then some internet based research could be done to check if there are some other approaches which could be applied to current problem.
+

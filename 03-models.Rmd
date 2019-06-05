@@ -1,0 +1,785 @@
+# Models
+
+I this chapter I describe process of building and improving prediction models, starting from simplest ones to more advanced.
+Initially I will be following steps described in the course official book [@IrizarryBook], but later will try to use some results described in prevoius chapter and further modify model based on early results.
+In this chapter, we will be using following symbols and abbreviations:
+
+- $U$ - set of all users contained in data set. Its element (i.e. particular user) will be denoted by $u$.
+- $I$ - set of all movies contained in data set. Its element (i.e. particular movie) will be denoted by $i$.
+- $T,\ V$ - we have divided entire data set into two distinct sets: training $T$ and validation $V$. Assuming that there may be only one (or none) rating of given movie by given user, we can define those sets as subbects of respective indexes pairs. 
+Following conditions are met:
+$$T\subsetneq U\times I,\ V\subsetneq U\times I,\ T\cap V = \emptyset$$
+- $Y_{u,i}$ - rating given by user $u$ for movie $i$. This synbol denotes random variable and is used only to describe models.
+- $y_{u,i}$ - observed rating given by user $u$ for movie $i$ ($(u, i) \in T\cup V$).
+- $\epsilon_{u,i}$ - random fluctuation - random variable with small variance and centered around zero. This symbol only appears in model description. In actual preditions we replace it with its expected value, which is 0.
+- $\rho_1(), \rho_2(), \rho_{u}()$ - ratings' rounding functions (to full-star or half-star).
+- RMSE, ACCU - loss functions that will measure how good is model, see section \@ref(problemdef). I will be rounding results of those functions to three meaningfull digits after comma.
+
+More symbols are introduced for particular models.
+
+```{r loss-func, include=FALSE}
+RMSE <- function(predicted_ratings, true_ratings){
+  sqrt(mean((true_ratings - predicted_ratings)^2))
+}
+ACCU <- function(predicted_ratings, true_ratings){
+  mean(abs(true_ratings - predicted_ratings) == 0)
+}
+```
+
+## Naive models
+I will calculate measures for simplest possible "model", which is constant prediction for all movies and users equal to total ratings avarage. This will be our starting, referrence point.
+
+### Mean of ratings
+Our model will be simple:
+
+$$Y_{u,i} = \mu + \epsilon_{u,i}$$
+
+where $\mu$ is mean of all ratings from training set.
+```{r mean-of-rating, include=FALSE}
+rmse1 <- round(RMSE(mu, validation$rating), 3)
+```
+RMSE is equal `r rmse1`. Values are not rounded to allowed ratings so ACCU does not have sense here.
+
+### Modal rating
+Our model will be equally simple:
+
+$$Y_{u,i} = m + \epsilon_{u,i}$$
+
+where $m$ is mode of all ratings from training set (i.e. most frequent rating).
+```{r modal-of-rating, include=FALSE}
+ux <- unique(edx$rating)
+mode_rat <- ux[which.max(tabulate(match(edx$rating, ux)))]
+rmse2 <- round(RMSE(mode_rat, validation$rating), 3)
+accu2 <- round(ACCU(mode_rat, validation$rating), 3)
+```
+RMSE is equal `r rmse2` and accuracy is `r accu2`. The most frequent value is `r mode_rat`.
+
+### Summary
+```{r}
+results <- data.frame(Method = "Just the average", RMSE = rmse1, ACCU = NA)
+results <- rbind(results, data.frame(Method = "Just the modal", RMSE = rmse2, ACCU = accu2))
+knitr::kable(results, caption = 'Results (naive models)')
+rm(ux, mode_rat, rmse1, rmse2, accu2)
+```
+
+## Movie effect
+There are generally better and worse movies, and better ones tends to be rated higher than worse.
+We will take this into account in our model:
+
+$$Y_{u,i} = \rho_\bullet(\mu + b_i + \epsilon_{u,i})$$
+
+where $b_i$ is movie effect - i.e. some modifier (with avarage zero) which is dependent on particular movie, and
+$\rho_\bullet$ stands for rounding function which will transform float-numeric calculation into allowed value (in 0.5 steps).
+The bullet sign means that we will be trying several rounding functions.
+
+### Rounding functions
+At first we will check model without any rounding, so: 
+$$\rho_0(r) = r$$
+Then we will check most obvoius rounding strategy i.e. to round calculated rating prediction to nearest allowed value - i.e. the value from set ${0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5}$. Let's call it $\rho_1$. Respective R code:
+```{r, echo=TRUE}
+rho1 <- function(rating) {
+  round(rating * 2) / 2
+}
+```
+Looking at histogram \@ref(fig:ratings-dist) we see a problem with this approach: users far more frequently give whole star ratings then half-star. So next tried rounding function will round to whole stars: $\rho_2$ with the code:
+```{r, echo=TRUE}
+rho2 <- function(rating) {
+  round(rating, 0)
+}
+```
+Finally we will try to utilize real proportion of half-stars in ratings from training set to more precise rounding function:
+$$\rho_3(r) = 
+  \begin{cases}
+  \rho_1(r)& \text{if}\ |r-\rho_1(r)| < \tau / 2 \\
+  \rho_2(r)& \text{if}\ |r-\rho_1(r)| \ge \tau / 2
+  \end{cases}
+$$
+where $\tau$ is the proportion of half-star ratings to all ratings which is for traing data `r round(thres_halfs, 3)`.
+The code:
+```{r, echo=TRUE}
+rho3 <- function(rating) {
+  r1 <- rho1(rating)
+  ifelse(abs(rating - r1) < thres_halfs / 2, r1, rho2(rating))
+}
+```
+### Predictions
+From mathematics we know that RMSE measure will be minimal if we assume movie factor as avarage rating difference from total mean taken for all users who rated given movie: 
+$$b_i = \text{Avg}_u(Y_{u,i} - \mu)$$
+```{r movie-effect, include=FALSE}
+movie_avgs <- edx %>%
+  group_by(movieId) %>%
+  summarize(b_i = mean(rating - mu))
+
+#movie_avgs %>% qplot(b_i, geom ="histogram", bins = 20, data = ., color = I("black"))
+raw_predicted_ratings <- mu + validation %>%
+  left_join(movie_avgs, by='movieId') %>%
+  .$b_i
+raw_predicted_ratings[raw_predicted_ratings < edx_min] = edx_min
+raw_predicted_ratings[raw_predicted_ratings > edx_max] = edx_max
+rho1_predicted_ratings <- rho1(raw_predicted_ratings)
+rho2_predicted_ratings <- rho2(raw_predicted_ratings)
+rho3_predicted_ratings <- rho3(raw_predicted_ratings)
+res_movie <- matrix(NA,4,2)
+res_movie[1,1] <- round(RMSE(raw_predicted_ratings, validation$rating), 3)
+res_movie[2,1] <- round(RMSE(rho1_predicted_ratings, validation$rating), 3)
+res_movie[2,2] <- round(ACCU(rho1_predicted_ratings, validation$rating), 3)
+res_movie[3,1] <- round(RMSE(rho2_predicted_ratings, validation$rating), 3)
+res_movie[3,2] <- round(ACCU(rho2_predicted_ratings, validation$rating), 3)
+res_movie[4,1] <- round(RMSE(rho3_predicted_ratings, validation$rating), 3)
+res_movie[4,2] <- round(ACCU(rho3_predicted_ratings, validation$rating), 3)
+```
+
+Following table list measures of predictions calculated according our model with applied different rounding functions:
+
+| $\rho_\bullet$  | RMSE | ACCU |
+|----------:|-------------------:|-------------------:|
+| $\rho_0$  | `r res_movie[1,1]` | `r res_movie[1,2]` |
+| $\rho_1$  | `r res_movie[2,1]` | `r res_movie[2,2]` |
+| $\rho_2$  | `r res_movie[3,1]` | `r res_movie[3,2]` |
+| $\rho_3$  | `r res_movie[4,1]` | `r res_movie[4,2]` |
+
+  : Movie effect with applied different rounding functions.
+
+Results are interesting. It looks like trying to optimize RMSE is in contradiction to optimizing ACCU. 
+It may also mean that maybe applied rounding functions are still not ideal. I will try to improve rounding function further in next models.
+
+### Summary
+We will add two models from prevoius section to our results list - those which the best optimize RMSE and ACCU.
+```{r}
+results <- rbind(results, data.frame(Method = "+ Movie effect (no rounding)", RMSE = res_movie[1,1], ACCU = res_movie[1,2]))
+results <- rbind(results, data.frame(Method = "+ Movie effect (rounding rho2)", RMSE = res_movie[3,1], ACCU = res_movie[3,2]))
+knitr::kable(results)
+#knitr::kable(results, caption = 'Results with movie effect')
+rm(raw_predicted_ratings, rho1_predicted_ratings, rho2_predicted_ratings, rho3_predicted_ratings)
+```
+
+Note that for models without rounding accuracy measure does not make sense because by definition it will be very low.
+
+## User effect
+Some users may be more demanding than others, and some may just like almost every movie or be very polite while rating. Also the mental maening of particular grade may be different (i.e. four stars for some may be high rate while for others just avarage). We will try to consider this factor now.
+$$Y_{u,i} = \rho_\bullet(\mu + b_i + b_u + \epsilon_{u,i})$$
+
+where new factor: $b_u$ is user effect - in similar way like movie effect in last section.
+
+### Rounding functions
+Beside general level of rating there is also one more factor which is very user specific. It is user's inclination for giving
+half-star's ratings. Some peple are perfoectionists and like do the things with highest precision - those will more likely will give more precise grades (i.e. fraction grades), whole other may not care that much or just see half-strs as not estetic 
+thing - those very rarely or just never wil give fraction rates. This ssms to be strongly confirmed on graph \@ref(fig:half-stars-analysis) where users are more-less grouped into those never giving fractions rates and those using fraction rates with frequency close to 50%. So it makes sense to use different rounding function for those two groups.
+So we will modify slightly our prevoius rounding function:
+$$\rho_u(r) = 
+  \begin{cases}
+  \rho_1(r)& \text{if}\ |r-\rho_1(r)| < \tau(u) / 2 \\
+  \rho_2(r)& \text{if}\ |r-\rho_1(r)| \ge \tau(u) / 2
+  \end{cases}
+$$
+where $\tau(u)$ is the proportion of half-star ratings calculated for particular user (unlike $\rho_3$ where it was constant).
+The code:
+```{r, echo=TRUE}
+rfrac_counts <- edx %>%
+  filter(rating != round(rating)) %>%
+  group_by(userId) %>%
+  summarize(rfrac = n())
+
+thres_halfs_by_user <- edx %>%
+  group_by(userId) %>%
+  summarize(rtot = n()) %>%
+  left_join(rfrac_counts, by = "userId") %>%
+  mutate(rfrac = ifelse(is.na(rfrac), 0, rfrac)) %>%
+  mutate(halfs = ifelse(rtot > 0, rfrac / rtot, thres_halfs)) %>%
+  select(-rtot, -rfrac)
+
+rho_u <- function(rating, user) {
+  r1 <- rho1(rating)
+  ifelse(abs(rating - r1) < filter(thres_halfs_by_user, userId == user)$halfs / 2, r1, rho2(rating))
+}
+rm(rfrac_counts)
+```
+
+Note: This code was given only for ilustration. Using such defined `rho_u` would be very unefficient bacause of nested filtering. While calculating predistion we will left-join `thres_halfs_by_user` frame to validation set instead and then calcute rounded value - what will give equivalent result.
+
+### Predictions
+As user effect factor we will take average of difference of ratings from predictions of our prevoius model (including movie effect) taken by movies for given user: 
+$$b_u = \text{Avg}_{\{i:\ (u,i)\in T\}}(y_{u,i} - (\mu + b_i))$$
+```{r user-effect, include=FALSE}
+rho_u <- function(rating, thres_by_user) {
+  r1 <- rho1(rating)
+  ifelse(abs(rating - r1) < thres_by_user / 2, r1, rho2(rating))
+}
+user_avgs <- edx %>%
+  left_join(movie_avgs, by='movieId') %>%
+  group_by(userId) %>%
+  summarize(b_u = mean(rating - mu - b_i))
+predicted_ratings <- validation %>%
+  left_join(movie_avgs, by='movieId') %>%
+  left_join(user_avgs, by='userId') %>%
+  left_join(thres_halfs_by_user, by='userId') %>%
+  mutate(pred_raw = mu + b_i + b_u) %>%
+  mutate(pred_rho1 = rho1(pred_raw),
+         pred_rho2 = rho2(pred_raw),
+         pred_rho3 = rho3(pred_raw),
+         pred_rho_u = rho_u(pred_raw, halfs))
+
+res_user <- matrix(NA,5,2)
+res_user[1,1] <- round(RMSE(predicted_ratings$pred_raw, validation$rating), 3)
+res_user[2,1] <- round(RMSE(predicted_ratings$pred_rho1, validation$rating), 3)
+res_user[2,2] <- round(ACCU(predicted_ratings$pred_rho1, validation$rating), 3)
+res_user[3,1] <- round(RMSE(predicted_ratings$pred_rho2, validation$rating), 3)
+res_user[3,2] <- round(ACCU(predicted_ratings$pred_rho2, validation$rating), 3)
+res_user[4,1] <- round(RMSE(predicted_ratings$pred_rho3, validation$rating), 3)
+res_user[4,2] <- round(ACCU(predicted_ratings$pred_rho3, validation$rating), 3)
+res_user[5,1] <- round(RMSE(predicted_ratings$pred_rho_u, validation$rating), 3)
+res_user[5,2] <- round(ACCU(predicted_ratings$pred_rho_u, validation$rating), 3)
+```
+Following table list measures of predictions calculated according our model with applied different rounding functions:
+
+| $\rho_\bullet$  | RMSE | ACCU |
+|----------:|------------------:|------------------:|
+| $\rho_0$  | `r res_user[1,1]` | `r res_user[1,2]` |
+| $\rho_1$  | `r res_user[2,1]` | `r res_user[2,2]` |
+| $\rho_2$  | `r res_user[3,1]` | `r res_user[3,2]` |
+| $\rho_3$  | `r res_user[4,1]` | `r res_user[4,2]` |
+| $\rho_u$  | `r res_user[5,1]` | `r res_user[5,2]` |
+
+  : User effect with applied different rounding functions.
+
+Results generally improved but are suprising I expected that $\rho_u$ should be pretty good now, but it's RMSE is second to worst 
+and accuracy is still worse that $\rho_2$. I wonder if there is still some fundamental, not accounted factor.
+
+### Summary
+Like recently we will add two models from prevoius section to our results list - those which the best optimize RMSE and ACCU.
+```{r}
+results <- rbind(results, data.frame(Method = "+ User effect (no rounding)", RMSE = res_user[1,1], ACCU = res_user[1,2]))
+results <- rbind(results, data.frame(Method = "+ User effect (rounding rho2)", RMSE = res_user[3,1], ACCU = res_user[3,2]))
+knitr::kable(results) # in PDF output tables with caption are misplaced on page
+#knitr::kable(results, caption = 'Results with movie and user effects')
+```
+
+Note that for models without rounding accuracy measure does not make sense because by definition it will be very low.
+
+## Year of production effect
+Results shown in section \@ref(by-year-users-stat) 
+seems to suggest that movie year of production may have any impact on ratings given by some users. So let's check if adding this factor to our model will improve it.
+$$Y_{u,i} = \rho_\bullet(\mu + b_i + b_u + b_{u,e} + \epsilon_{u,i})$$
+where $b_{u,e}$ is year's (epoch's) efect calculated per given user from his/her ratings of movies that were produced in similar time frame that movie whose rating is being predicted.
+We will calculate it as average of those ratings:
+$$b_{u,e} = \text{Avg}_{\{i:\ E(i)\ni e\text{ and }(u,i)\in T\}}(y_{u,i} - (\mu + b_i + b_u))$$
+Here $E(i)$ is set of movies that are produced in same time frame as given movie $i$. We do not use per year ganularity, but rather widen "epochs" as described in  \@ref(by-year-stat). If this value can not be calculated for some record from training set we will assume it to be zero.
+
+### Predictions
+```{r epoch-by-user-effect1, include=FALSE}
+# Instruction mutate(avg_b_ug = ifelse(is.na(avg_b_ug), 0, avg_b_ug))
+# is necessary, because avg_b_ug was generated only for combanations from validation set (to limit memory and computing time)
+epoch_by_user_avgs <- edx %>%
+  left_join(movie_avgs, by='movieId') %>%
+  left_join(user_avgs, by='userId') %>%
+  group_by(year_class, userId) %>%
+  summarize(b_ue = mean(rating - mu - b_i - b_u))
+```
+```{r epoch-by-user-effect2, include=FALSE}
+# Instruction mutate(b_ue = ifelse(is.na(b_ue), 0, b_ue))
+# is necessary, because not all combinations of c('userId', 'year_class') from validation set are present in trining set.
+predicted_ratings <- validation %>%
+  left_join(movie_avgs, by='movieId') %>%
+  left_join(user_avgs, by='userId') %>%
+  left_join(thres_halfs_by_user, by='userId') %>%
+  left_join(epoch_by_user_avgs, by=c('userId', 'year_class')) %>%
+  mutate(b_ue = ifelse(is.na(b_ue), 0, b_ue)) %>%
+  mutate(pred_raw = mu + b_i + b_u + b_ue) %>%
+  mutate(pred_rho1 = rho1(pred_raw),
+         pred_rho2 = rho2(pred_raw),
+         pred_rho3 = rho3(pred_raw),
+         pred_rho_u = rho_u(pred_raw, halfs))
+
+res_epoch <- matrix(NA,5,2)
+res_epoch[1,1] <- round(RMSE(predicted_ratings$pred_raw, validation$rating), 3)
+res_epoch[2,1] <- round(RMSE(predicted_ratings$pred_rho1, validation$rating), 3)
+res_epoch[2,2] <- round(ACCU(predicted_ratings$pred_rho1, validation$rating), 3)
+res_epoch[3,1] <- round(RMSE(predicted_ratings$pred_rho2, validation$rating), 3)
+res_epoch[3,2] <- round(ACCU(predicted_ratings$pred_rho2, validation$rating), 3)
+res_epoch[4,1] <- round(RMSE(predicted_ratings$pred_rho3, validation$rating), 3)
+res_epoch[4,2] <- round(ACCU(predicted_ratings$pred_rho3, validation$rating), 3)
+res_epoch[5,1] <- round(RMSE(predicted_ratings$pred_rho_u, validation$rating), 3)
+res_epoch[5,2] <- round(ACCU(predicted_ratings$pred_rho_u, validation$rating), 3)
+```
+Following table list measures of predictions calculated according our model with applied different rounding functions:
+
+| $\rho_\bullet$  | RMSE | ACCU |
+|----------:|-------------------:|-------------------:|
+| $\rho_0$  | `r res_epoch[1,1]` | `r res_epoch[1,2]` |
+| $\rho_1$  | `r res_epoch[2,1]` | `r res_epoch[2,2]` |
+| $\rho_2$  | `r res_epoch[3,1]` | `r res_epoch[3,2]` |
+| $\rho_3$  | `r res_epoch[4,1]` | `r res_epoch[4,2]` |
+| $\rho_u$  | `r res_epoch[5,1]` | `r res_epoch[5,2]` |
+
+  : Epoch effect with applied different rounding functions.
+
+To my surprise RMSE measures degradated a bit, while Acuracy little imroved. It looks like ading movie year of production to model introduced more noise to predictions and are not very helpfull. I suppose that it was because many users have rated very few or just single movies from given epoch, and this influenced too much on prediction model. To quickly check that (without making heavy computations) I decided to try cutting-off (bring down to zero) movie epoch parameter in case user rated less than 10 movies from given epoch.
+
+Here is the code of this transformation (see last mutate instruction):
+```{r epoch-by-user-effect1-test, echo=TRUE}
+epoch_by_user_avgs_test <- edx %>%
+  left_join(movie_avgs, by='movieId') %>%
+  left_join(user_avgs, by='userId') %>%
+  group_by(year_class, userId) %>%
+  summarize(b_ue = mean(rating - mu - b_i - b_u), cnt = n()) %>%
+  mutate(b_ue = ifelse(cnt < 10, 0, b_ue))
+```
+And results:
+```{r epoch-by-user-effect2-test, include=FALSE}
+predicted_ratings <- validation %>%
+  left_join(movie_avgs, by='movieId') %>%
+  left_join(user_avgs, by='userId') %>%
+  left_join(thres_halfs_by_user, by='userId') %>%
+  left_join(epoch_by_user_avgs_test, by=c('userId', 'year_class')) %>%
+  mutate(b_ue = ifelse(is.na(b_ue), 0, b_ue)) %>%
+  mutate(pred_raw = mu + b_i + b_u + b_ue) %>%
+  mutate(pred_rho1 = rho1(pred_raw),
+         pred_rho2 = rho2(pred_raw),
+         pred_rho3 = rho3(pred_raw),
+         pred_rho_u = rho_u(pred_raw, halfs))
+
+res_epoch_test <- matrix(NA,5,2)
+res_epoch_test[1,1] <- round(RMSE(predicted_ratings$pred_raw, validation$rating), 3)
+res_epoch_test[2,1] <- round(RMSE(predicted_ratings$pred_rho1, validation$rating), 3)
+res_epoch_test[2,2] <- round(ACCU(predicted_ratings$pred_rho1, validation$rating), 3)
+res_epoch_test[3,1] <- round(RMSE(predicted_ratings$pred_rho2, validation$rating), 3)
+res_epoch_test[3,2] <- round(ACCU(predicted_ratings$pred_rho2, validation$rating), 3)
+res_epoch_test[4,1] <- round(RMSE(predicted_ratings$pred_rho3, validation$rating), 3)
+res_epoch_test[4,2] <- round(ACCU(predicted_ratings$pred_rho3, validation$rating), 3)
+res_epoch_test[5,1] <- round(RMSE(predicted_ratings$pred_rho_u, validation$rating), 3)
+res_epoch_test[5,2] <- round(ACCU(predicted_ratings$pred_rho_u, validation$rating), 3)
+
+rm (movie_avgs, user_avgs, epoch_by_user_avgs, epoch_by_user_avgs_test)
+```
+
+| $\rho_\bullet$  | RMSE | ACCU |
+|----------:|-------------------:|-------------------:|
+| $\rho_0$  | `r res_epoch_test[1,1]` | `r res_epoch_test[1,2]` |
+| $\rho_1$  | `r res_epoch_test[2,1]` | `r res_epoch_test[2,2]` |
+| $\rho_2$  | `r res_epoch_test[3,1]` | `r res_epoch_test[3,2]` |
+| $\rho_3$  | `r res_epoch_test[4,1]` | `r res_epoch_test[4,2]` |
+| $\rho_u$  | `r res_epoch_test[5,1]` | `r res_epoch_test[5,2]` |
+
+This time RMSE measures have improved and are also better than those without date of movie production effect. It means that movie production date may be a meaningfull factor but needs to be regularized. This case shows that regularization may be in general important process. So I decided to reimplement all prevoius models, but this time performing regularization instead of taking just means.
+
+## Regularization
+Regularization means that we want our movie, user or year effects to be less affected by potential random fluctuations.
+Random fluctuation happens when the mean is taken from relatively small number of samples. In such case we would like calculated effect to be smaller - i.e. closer to zero, while when taken from bigger sample - closer to actual average.
+This is being achived by changing our effect calculation rule from e.g.
+```{r eval=FALSE, echo=TRUE}
+  summarize(b_i = mean(rating - mu))
+```
+to:
+```{r eval=FALSE, echo=TRUE}
+  summarize(b_i = sum(rating - mu) / (n() + lambda))
+```
+where `lambda` is some positive parameter (if zero it turnes out to be regular mean).
+It is being appointed experimantally in the following way: 
+
+- we split our training set (`edx`) into 2 separate sub-sets: `edx_training` and `edx_test` in the way that training set is bigger then test (e.g. 90% / 10%) and all movies and users present in test set are also present in training set.
+- we assume that `lanbda` belongs to certain set of discrete values (e.g. the range between certain values at certain step).
+- for every `lambda` value from our set we calculate effect based on training set and check RMSE against test set.
+- we choose `lambda` for which RMSE is minimal.
+
+Unlike in the course book, we will try to find optimal `lambda` separately for every kind of effect.
+```{r edx-split-r, include=FALSE}
+set.seed(1970)
+test_index <- createDataPartition(y = edx$rating, times = 1, p = 0.1, list = FALSE)
+edx_train <- edx[-test_index,]
+edx_temp <- edx[test_index,]
+edx_test <- edx_temp %>% 
+  semi_join(edx_train, by = "movieId") %>%
+  semi_join(edx_train, by = "userId")
+removed <- anti_join(edx_temp, edx_test)
+edx_train <- rbind(edx_train, removed)
+rm(test_index, edx_temp, removed)
+```
+
+## Movie effect with regularization
+We will be checking following lambda values:
+```{r echo=TRUE}
+lambdas <- seq(0, 10, 0.25)
+```
+```{r movie-effect-r1, include=FALSE}
+rmses <- sapply(lambdas, function(lam) {
+  movie_avgs_r <- edx_train %>%
+    group_by(movieId) %>%
+    summarize(b_i = sum(rating - mu) / (n() + lam))
+  
+  predicted_ratings <- edx_test %>%
+    left_join(movie_avgs_r, by='movieId') %>%
+    mutate(pred_raw = mu + b_i)
+  return (RMSE(predicted_ratings$pred_raw, edx_test$rating))
+})
+```
+```{r movie-effect-r2}
+#, fig.cap='Results for different lambda values'
+lambda_i <- lambdas[which.min(rmses)]
+ggplot() + 
+  geom_point(aes(lambdas,rmses)) + 
+  geom_point(aes(lambda_i,rmses[which.min(rmses)]), col="red")
+  # + ggtitle("Results for different lambda values")
+```
+
+Minimum is reached for $\lambda_i$ = `r lambda_i` which we then apply in our model.
+
+```{r movie-effect-r3, include=FALSE}
+movie_avgs_r <- edx %>%
+  group_by(movieId) %>%
+  summarize(b_i = sum(rating - mu) / (n() + lambda_i))
+
+predicted_ratings <- validation %>%
+  left_join(movie_avgs_r, by='movieId') %>%
+  mutate(pred_raw = mu + b_i) %>%
+  mutate(pred_raw = ifelse(pred_raw < edx_min, edx_min, ifelse(pred_raw > edx_max, edx_max, pred_raw))) %>%
+  mutate(pred_rho1 = rho1(pred_raw),
+         pred_rho2 = rho2(pred_raw),
+         pred_rho3 = rho3(pred_raw))
+
+res_movie_r <- matrix(NA,4,2)
+res_movie_r[1,1] <- round(RMSE(predicted_ratings$pred_raw, validation$rating), 3)
+res_movie_r[2,1] <- round(RMSE(predicted_ratings$pred_rho1, validation$rating), 3)
+res_movie_r[2,2] <- round(ACCU(predicted_ratings$pred_rho1, validation$rating), 3)
+res_movie_r[3,1] <- round(RMSE(predicted_ratings$pred_rho2, validation$rating), 3)
+res_movie_r[3,2] <- round(ACCU(predicted_ratings$pred_rho2, validation$rating), 3)
+res_movie_r[4,1] <- round(RMSE(predicted_ratings$pred_rho3, validation$rating), 3)
+res_movie_r[4,2] <- round(ACCU(predicted_ratings$pred_rho3, validation$rating), 3)
+```
+Following table compares measures calculated with and without regularization (marked with **reg**/**mean** postfix respactively):
+
+| $\rho_\bullet$ | RMSE reg | ACCU reg | RMSE mean | ACCU mean |
+|----------:|---------------------:|---------------------:|-------------------:|-------------------:|
+| $\rho_0$  | `r res_movie_r[1,1]` | `r res_movie_r[1,2]` | `r res_movie[1,1]` | `r res_movie[1,2]` |
+| $\rho_1$  | `r res_movie_r[2,1]` | `r res_movie_r[2,2]` | `r res_movie[2,1]` | `r res_movie[2,2]` |
+| $\rho_2$  | `r res_movie_r[3,1]` | `r res_movie_r[3,2]` | `r res_movie[3,1]` | `r res_movie[3,2]` |
+| $\rho_3$  | `r res_movie_r[4,1]` | `r res_movie_r[4,2]` | `r res_movie[4,1]` | `r res_movie[4,2]` |
+
+  : Movie effect with regularization.
+
+Results are pretty much the same, so regularization did not helped much in this case.
+
+## User effect with regularization
+We will be checking the same lambda values:
+```{r echo=TRUE}
+lambdas <- seq(0, 10, 0.25)
+```
+```{r user-effect-r1, include=FALSE}
+rmses <- sapply(lambdas, function(lam) {
+  user_avgs_r <- edx_train %>%
+    left_join(movie_avgs_r, by='movieId') %>%
+    group_by(userId) %>%
+    summarize(b_u = sum(rating - mu - b_i) / (n() + lam))
+  
+  predicted_ratings <- edx_test %>%
+    left_join(movie_avgs_r, by='movieId') %>%
+    left_join(user_avgs_r, by='userId') %>%
+    mutate(pred_raw = mu + b_i + b_u)
+  return (RMSE(predicted_ratings$pred_raw, edx_test$rating))
+})
+```
+```{r user-effect-r2}
+lambda_u <- lambdas[which.min(rmses)]
+ggplot() + 
+  geom_point(aes(lambdas,rmses)) + 
+  geom_point(aes(lambda_u,rmses[which.min(rmses)]), col="red")
+  # + ggtitle("Results for different lambda values")
+```
+
+Minimum is reached for $\lambda_u$ = `r lambda_u` which we then apply in our model.
+
+```{r user-effect-r3, include=FALSE}
+user_avgs_r <- edx %>%
+  left_join(movie_avgs_r, by='movieId') %>%
+  group_by(userId) %>%
+  summarize(b_u = sum(rating - mu - b_i) / (n() + lambda_u))
+
+predicted_ratings <- validation %>%
+  left_join(movie_avgs_r, by='movieId') %>%
+  left_join(user_avgs_r, by='userId') %>%
+  left_join(thres_halfs_by_user, by='userId') %>%
+  mutate(pred_raw = mu + b_i + b_u) %>%
+  mutate(pred_raw = ifelse(pred_raw < edx_min, edx_min, ifelse(pred_raw > edx_max, edx_max, pred_raw))) %>%
+  mutate(pred_rho1 = rho1(pred_raw),
+         pred_rho2 = rho2(pred_raw),
+         pred_rho3 = rho3(pred_raw),
+         pred_rho_u = rho_u(pred_raw, halfs))
+
+res_user_r <- matrix(NA,5,2)
+res_user_r[1,1] <- round(RMSE(predicted_ratings$pred_raw, validation$rating), 3)
+res_user_r[2,1] <- round(RMSE(predicted_ratings$pred_rho1, validation$rating), 3)
+res_user_r[2,2] <- round(ACCU(predicted_ratings$pred_rho1, validation$rating), 3)
+res_user_r[3,1] <- round(RMSE(predicted_ratings$pred_rho2, validation$rating), 3)
+res_user_r[3,2] <- round(ACCU(predicted_ratings$pred_rho2, validation$rating), 3)
+res_user_r[4,1] <- round(RMSE(predicted_ratings$pred_rho3, validation$rating), 3)
+res_user_r[4,2] <- round(ACCU(predicted_ratings$pred_rho3, validation$rating), 3)
+res_user_r[5,1] <- round(RMSE(predicted_ratings$pred_rho_u, validation$rating), 3)
+res_user_r[5,2] <- round(ACCU(predicted_ratings$pred_rho_u, validation$rating), 3)
+```
+Following table compares measures calculated with and without regularization:
+
+| $\rho_\bullet$ | RMSE reg | ACCU reg | RMSE mean | ACCU mean |
+|----------:|--------------------:|--------------------:|------------------:|------------------:|
+| $\rho_0$  | `r res_user_r[1,1]` | `r res_user_r[1,2]` | `r res_user[1,1]` | `r res_user[1,2]` |
+| $\rho_1$  | `r res_user_r[2,1]` | `r res_user_r[2,2]` | `r res_user[2,1]` | `r res_user[2,2]` |
+| $\rho_2$  | `r res_user_r[3,1]` | `r res_user_r[3,2]` | `r res_user[3,1]` | `r res_user[3,2]` |
+| $\rho_3$  | `r res_user_r[4,1]` | `r res_user_r[4,2]` | `r res_user[4,1]` | `r res_user[4,2]` |
+| $\rho_u$  | `r res_user_r[5,1]` | `r res_user_r[5,2]` | `r res_user[5,1]` | `r res_user[5,2]` |
+
+  : User effect with regularization.
+
+Results are pretty much the same, so regularization also did not helped much in this case.
+
+## Year of production effect with regularization
+We will be checking at first more wide range of lambda values:
+```{r echo=TRUE}
+lambdas <- seq(0, 60, 2)
+```
+```{r epoch-effect-r1, include=FALSE}
+rmses <- sapply(lambdas, function(lam) {
+  epoch_by_user_avgs_r <- edx_train %>%
+    left_join(movie_avgs_r, by='movieId') %>%
+    left_join(user_avgs_r, by='userId') %>%
+    group_by(year_class, userId) %>%
+    summarize(b_ue = sum(rating - mu - b_i - b_u) / (n() + lam))
+  
+  predicted_ratings <- edx_test %>%
+    left_join(movie_avgs_r, by='movieId') %>%
+    left_join(user_avgs_r, by='userId') %>%
+    left_join(epoch_by_user_avgs_r, by=c('userId', 'year_class')) %>%
+    mutate(b_ue = ifelse(is.na(b_ue), 0, b_ue)) %>%
+    mutate(pred_raw = mu + b_i + b_u + b_ue)
+  return (RMSE(predicted_ratings$pred_raw, edx_test$rating))
+})
+```
+```{r epoch-effect-r2}
+lambda_e <- lambdas[which.min(rmses)]
+ggplot() + 
+  geom_point(aes(lambdas,rmses)) + 
+  geom_point(aes(lambda_e,rmses[which.min(rmses)]), col="red")
+  # + ggtitle("Results for different lambda values")
+```
+
+Minimum is reached for value `r lambda_e`.
+We will then try to check values around this rough minimal value to estamate parameter with bigger precision:
+```{r echo=TRUE}
+lambdas <- seq(28, 38, 0.2)
+```
+```{r epoch-effect-r3, include=FALSE}
+rmses <- sapply(lambdas, function(lam) {
+  epoch_by_user_avgs_r <- edx_train %>%
+    left_join(movie_avgs_r, by='movieId') %>%
+    left_join(user_avgs_r, by='userId') %>%
+    group_by(year_class, userId) %>%
+    summarize(b_ue = sum(rating - mu - b_i - b_u) / (n() + lam))
+  
+  predicted_ratings <- edx_test %>%
+    left_join(movie_avgs_r, by='movieId') %>%
+    left_join(user_avgs_r, by='userId') %>%
+    left_join(epoch_by_user_avgs_r, by=c('userId', 'year_class')) %>%
+    mutate(b_ue = ifelse(is.na(b_ue), 0, b_ue)) %>%
+    mutate(pred_raw = mu + b_i + b_u + b_ue)
+  return (RMSE(predicted_ratings$pred_raw, edx_test$rating))
+})
+```
+```{r epoch-effect-r4}
+lambda_e <- lambdas[which.min(rmses)]
+ggplot() + 
+  geom_point(aes(lambdas,rmses)) + 
+  geom_point(aes(lambda_e,rmses[which.min(rmses)]), col="red")
+#  + ggtitle("Results for different lambda values")
+```
+
+Minimum is reached for $\lambda_e$ = `r lambda_e` which we then apply in our model.
+
+```{r epoch-effect-r5, include=FALSE}
+epoch_by_user_avgs_r <- edx %>%
+  left_join(movie_avgs_r, by='movieId') %>%
+  left_join(user_avgs_r, by='userId') %>%
+  group_by(year_class, userId) %>%
+  summarize(b_ue = sum(rating - mu - b_i - b_u) / (n() + lambda_e))
+
+predicted_ratings <- validation %>%
+  left_join(movie_avgs_r, by='movieId') %>%
+  left_join(user_avgs_r, by='userId') %>%
+  left_join(thres_halfs_by_user, by='userId') %>%
+  left_join(epoch_by_user_avgs_r, by=c('userId', 'year_class')) %>%
+  mutate(b_ue = ifelse(is.na(b_ue), 0, b_ue)) %>%
+  mutate(pred_raw = mu + b_i + b_u + b_ue) %>%
+  mutate(pred_raw = ifelse(pred_raw < edx_min, edx_min, ifelse(pred_raw > edx_max, edx_max, pred_raw))) %>%
+  mutate(pred_rho1 = rho1(pred_raw),
+         pred_rho2 = rho2(pred_raw),
+         pred_rho3 = rho3(pred_raw),
+         pred_rho_u = rho_u(pred_raw, halfs))
+
+res_epoch_r <- matrix(NA,5,2)
+res_epoch_r[1,1] <- round(RMSE(predicted_ratings$pred_raw, validation$rating), 3)
+res_epoch_r[2,1] <- round(RMSE(predicted_ratings$pred_rho1, validation$rating), 3)
+res_epoch_r[2,2] <- round(ACCU(predicted_ratings$pred_rho1, validation$rating), 3)
+res_epoch_r[3,1] <- round(RMSE(predicted_ratings$pred_rho2, validation$rating), 3)
+res_epoch_r[3,2] <- round(ACCU(predicted_ratings$pred_rho2, validation$rating), 3)
+res_epoch_r[4,1] <- round(RMSE(predicted_ratings$pred_rho3, validation$rating), 3)
+res_epoch_r[4,2] <- round(ACCU(predicted_ratings$pred_rho3, validation$rating), 3)
+res_epoch_r[5,1] <- round(RMSE(predicted_ratings$pred_rho_u, validation$rating), 3)
+res_epoch_r[5,2] <- round(ACCU(predicted_ratings$pred_rho_u, validation$rating), 3)
+
+rm(edx_train, edx_test)
+```
+Following table compares measures calculated with and without regularization:
+
+| $\rho_\bullet$ | RMSE reg | ACCU reg | RMSE mean | ACCU mean |
+|----------:|---------------------:|---------------------:|-------------------:|-------------------:|
+| $\rho_0$  | `r res_epoch_r[1,1]` | `r res_epoch_r[1,2]` | `r res_epoch[1,1]` | `r res_epoch[1,2]` |
+| $\rho_1$  | `r res_epoch_r[2,1]` | `r res_epoch_r[2,2]` | `r res_epoch[2,1]` | `r res_epoch[2,2]` |
+| $\rho_2$  | `r res_epoch_r[3,1]` | `r res_epoch_r[3,2]` | `r res_epoch[3,1]` | `r res_epoch[3,2]` |
+| $\rho_3$  | `r res_epoch_r[4,1]` | `r res_epoch_r[4,2]` | `r res_epoch[4,1]` | `r res_epoch[4,2]` |
+| $\rho_u$  | `r res_epoch_r[5,1]` | `r res_epoch_r[5,2]` | `r res_epoch[5,1]` | `r res_epoch[5,2]` |
+
+  : Epoch effect with regularization.
+
+Those results prove that regularization allowed us to improve results considerably.
+
+### Summary
+We have finally work-out model that futher improved our results - so let's add it to our sumary list.
+```{r}
+results <- rbind(results, data.frame(Method = "+ Epoch regularized effect (no rounding)", RMSE = res_epoch_r[1,1], ACCU = res_epoch_r[1,2]))
+results <- rbind(results, data.frame(Method = "+ Epoch regularized effect (rounding rho2)", RMSE = res_epoch_r[3,1], ACCU = res_epoch_r[3,2]))
+knitr::kable(results)
+#knitr::kable(results, caption = 'Results with movie, user and epoch effects')
+```
+
+## Generics effect {#generics-effect}
+Some users may prefer certain kind of movies represented by generics assiciated to movies. Results shown in section \@ref(by-gen-users-stat) 
+seems to confirm that. So let's add this factor to our model based on regularized effects.
+In below formulas we will add acute sign to effects that are computed with regularization ( like $b_i'$ ) to distinguish them from regular mean-based ( like $b_i$ ).
+$$Y_{u,i} = \rho_\bullet(\mu + b_i' + b_u' + b_{u,e}' + \overline{b_{u, G(i)}} + \epsilon_{u,i})$$
+where $G(i)$ is set of genres associated with the given movie $i$, and:
+$$\overline{b_{u, G(i)}} = \text{Avg}_{\{g\in G(i)\}}(b_{u,g})$$
+i.e. it is mean of genre effects for genres of given movie and characteristic for given user.
+We will calculate it as average of diffeneces between known ratings for given user of other movies with the same genre and prediction of recent model:
+$$b_{u,g} = \text{Avg}_{\{i:\ G(i)\ni g\text{ and }(u,i)\in T\}}(y_{u,i} - (\mu + b_i' + b_u' + b_{u,e}'))$$
+Our model require a lot of calculation, so for performance reasons we will not use regularization here.
+
+### Predictions
+```{r generics-r-effect1, include=FALSE}
+## Calculations in 'else' branch will take long time (even 6-7h)
+## so I have saved crutial results in the file to save time in case user do not want to repeat them
+if (file.exists("RData/genres_users_r.RData")) {
+  load("RData/genres_users_r.RData")
+} else {
+  rgens <- bind_rows(lapply(generics, function(gen) {
+     edx %>%
+       filter(str_detect(genres, gen)) %>%
+       mutate(gen = gen)
+  }))
+  rgens <- rgens %>% mutate(gen = factor(gen))
+  
+  genres_avgs_r <- rgens %>%
+    left_join(movie_avgs_r, by='movieId') %>%
+    left_join(user_avgs_r, by='userId') %>%
+    left_join(epoch_by_user_avgs_r, by=c('userId', 'year_class')) %>%
+    mutate(b_ue = ifelse(is.na(b_ue), 0, b_ue)) %>%
+    group_by(gen, userId) %>%
+    summarize(b_ug = mean(rating - mu - b_i - b_u - b_ue))
+  genres <-
+    movies %>%
+    distinct(genres) %>%
+    .$genres %>%
+    unlist %>%
+    unique
+  userId <-
+    validation %>%
+    distinct(userId) %>%
+    .$userId %>%
+    unlist
+  calc_bt_status <- 0
+  calc_bt <- function(gen, u) {
+    calc_bt_status <<- calc_bt_status + 1
+    if (calc_bt_status %% 10000 == 0) {
+      print(paste(calc_bt_status, " done"))
+    }
+    genv <- str_split(gen, "\\|", simplify = T)
+    mean(
+      genres_avgs_r %>%
+        filter(gen %in% genv & userId == u) %>%
+        .$b_ug
+    )
+  }
+  genres_users_r <- 
+    crossing(userId, genres) %>%
+    semi_join(validation)
+  
+  # WARNING: This is computation heavy procedure (average calculation time: 6h30')
+  genres_users_r <- 
+    mutate(genres_users_r, avg_b_ug = as.vector(by(genres_users_r, 1:nrow(genres_users_r), function(row) calc_bt(row$genres, row$userId))))
+  genres_users_r <- 
+    mutate(genres_users_r, avg_b_ug = ifelse(is.nan(avg_b_ug), 0, avg_b_ug))
+  
+  rm(rgens, genres_avgs_r, genres, userId, calc_bt_status, calc_bt)
+}
+
+predicted_ratings <- validation %>%
+  left_join(movie_avgs_r, by='movieId') %>%
+  left_join(user_avgs_r, by='userId') %>%
+  left_join(thres_halfs_by_user, by='userId') %>%
+  left_join(epoch_by_user_avgs_r, by=c('userId', 'year_class')) %>%
+  mutate(b_ue = ifelse(is.na(b_ue), 0, b_ue)) %>%
+  left_join(genres_users_r, by=c('userId', 'genres')) %>%
+  mutate(pred_raw = mu + b_i + b_u + b_ue + avg_b_ug) %>%
+  mutate(pred_rho1 = rho1(pred_raw),
+         pred_rho2 = rho2(pred_raw),
+         pred_rho3 = rho3(pred_raw),
+         pred_rho_u = rho_u(pred_raw, halfs))
+
+res_genres <- matrix(NA,5,2)
+res_genres[1,1] <- round(RMSE(predicted_ratings$pred_raw, validation$rating), 3)
+res_genres[2,1] <- round(RMSE(predicted_ratings$pred_rho1, validation$rating), 3)
+res_genres[2,2] <- round(ACCU(predicted_ratings$pred_rho1, validation$rating), 3)
+res_genres[3,1] <- round(RMSE(predicted_ratings$pred_rho2, validation$rating), 3)
+res_genres[3,2] <- round(ACCU(predicted_ratings$pred_rho2, validation$rating), 3)
+res_genres[4,1] <- round(RMSE(predicted_ratings$pred_rho3, validation$rating), 3)
+res_genres[4,2] <- round(ACCU(predicted_ratings$pred_rho3, validation$rating), 3)
+res_genres[5,1] <- round(RMSE(predicted_ratings$pred_rho_u, validation$rating), 3)
+res_genres[5,2] <- round(ACCU(predicted_ratings$pred_rho_u, validation$rating), 3)
+```
+Following table list measures of predictions calculated according to our model with applied different rounding functions:
+
+| $\rho_\bullet$  | RMSE | ACCU |
+|----------:|--------------------:|--------------------:|
+| $\rho_0$  | `r res_genres[1,1]` | `r res_genres[1,2]` |
+| $\rho_1$  | `r res_genres[2,1]` | `r res_genres[2,2]` |
+| $\rho_2$  | `r res_genres[3,1]` | `r res_genres[3,2]` |
+| $\rho_3$  | `r res_genres[4,1]` | `r res_genres[4,2]` |
+| $\rho_u$  | `r res_genres[5,1]` | `r res_genres[5,2]` |
+
+  : Generics effect with applied different rounding functions.
+
+### Summary
+We will add recent result, and here is final list of our models:
+```{r}
+results <- rbind(results, data.frame(Method = "+ Genres effect (no rounding)", RMSE = res_genres[1,1], ACCU = res_genres[1,2]))
+results <- rbind(results, data.frame(Method = "+ Genres effect (rounding rho2)", RMSE = res_genres[3,1], ACCU = res_genres[3,2]))
+knitr::kable(results)
+#knitr::kable(results, caption = 'Results with movie, user, epoch and genres effects')
+```
+
+### Graphical overview of results
+```{r final-results}
+results_RMSE <- results[is.na(results$ACCU),1:2]
+results_ACCU <- results[!is.na(results$ACCU),c(1,3)]
+p1 <- results_RMSE %>% 
+  ggplot(aes(x = reorder(Method, RMSE), y = RMSE)) + 
+  geom_col(width = .6, fill = "blue") +
+  xlab("") + ylab("RMSE (less is better)") +
+  scale_y_continuous(breaks=seq(0,1.1,0.1)) +
+  coord_flip() +
+  theme(aspect.ratio = .3)
+p2 <- results_ACCU %>% 
+  ggplot(aes(x = reorder(Method, -ACCU), y = ACCU)) + 
+  geom_col(width = .6, fill = "red") +
+  xlab("") + ylab("Accuracy (more is better)") +
+  scale_y_continuous(breaks=seq(0,0.4,0.04)) +
+  coord_flip() +
+  theme(aspect.ratio = .3)
+grid.arrange(p1, p2, nrow = 2)
+rm (results_RMSE, results_ACCU, p1, p2)
+```

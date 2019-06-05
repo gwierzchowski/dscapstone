@@ -1,0 +1,23 @@
+Package: Capstone
+Type: Package
+Title: What the Package Does (Title Case)
+Version: 0.1.0
+Author: Who wrote it
+Maintainer: The package maintainer <yourself@somewhere.net>
+Description: More about what it does (maybe more than one line)
+    Use four spaces when indenting paragraphs within the Description.
+License: What license is it under?
+Encoding: UTF-8
+LazyData: true
+
+The report that documents the analysis and presents the findings, along with supporting statistics and figures. The report is written in English and uploaded. The report should include the RMSE generated. The report includes at least the following sections:
+
+1. an introduction/overview/executive summary section that describes the dataset and summarizes the goal of the project and key steps that were performed
+2. a methods/analysis section that explains the process and techniques used, such as data cleaning, data exploration and visualization, any insights gained, and your modeling approach
+3. a results section
+4. a conclusion section
+
+New MovieLens Submission
+Your Responsedue Jun 18, 2019 01:59 CEST (in 1 month, 2 weeks)
+
+Assess Peersdue Jun 29, 2019 01:59 CEST (in 1 month, 3 weeks)

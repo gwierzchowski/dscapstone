@@ -1,0 +1,48 @@
+# Conclusion
+
+## Final Model {#final-model}
+Our final movie rating prodiction model takes folowing characteristics into consideration:
+
+- how movie was rated by other users
+- how user rated all other movies
+- how user rated movies coming from similar year decade
+- how user rated movies that have similar generics that movie to be rated
+- how much user is inclined to give half-star ratings
+
+The rating estimation is a sum of total mean value from all ratings, and correction coefficients for all above factors called also 'effects'. In case of first three points above, the effect is calculated as:
+$$b(\text{group}) = \frac{\sum_{\text{all movies and users in group}}(y_{i,u} - \hat{y}_{i,u})}{n(\text{group}) + \lambda}$$
+where $y_{i,u}$ is actual rating, $\hat{y}_{i,u}$ is predicion of current model (i.e. model before applying currently calculated effect), 
+$n(\text{group})$ is number of elements in group, and $\lambda$ is a constant which depands on kind of effect and is
+caclulated by try-check (training) process, where different values are tried and the one which minimize RMSE is selected.
+All calculations are performed only on training set: `edx`. Note that if $\lambda = 0$ this calculataion narrowns down to siple average.
+But usually (aspecially for year of production effect), better results were achived when this parameter was a positive contant.
+The idea behind this formula is that it gives value close to average for bigger gropus and is closer to zero for smaller groups (for which average might not represent any trend but rather be more random value).
+
+For the forth point (generics effect) calculation is more complicated, because every movie has many assigned generics and this particular set of generics might be different then for other movies from validation set. So we first divide our training set
+by particular generics (duplicating rating records), and then calculate averages for particular user and generic. Therefore when calculating prediction for particular movie and user we take average of those caculated averages. Because of proformance reasons we do not try to regularize results and estimate special $\lambda$ value for this case. This is described in more detail in section \@ref(generics-effect) and prevoius sections.
+
+Such model when applied to validation set gave us RMSE measure equal to **`r res_genres[1,1]`** when taking raw calculated predictions without rounding. For rounded predictions maximal achived RMSE was: `r res_genres[2,1]` - when rounding was performed to closed allowed rating. Maximal obtained accuracy was when we rounded predictions to whole stars, and it was: `r res_genres[3,2]`.
+All caculation routines with full source code is contained as R code ambeded in this report sources, which are available from repository: <https://github.com/gwierzchowski/>.
+
+## Ideas for futher researches
+The time for course final capstone excercise is limited, and also the time that I can sacrifice on it is very limited.
+Because of those constraints I did not managed to realize some ideas that I initally intended. Most important are:
+
+- try to utilize somehow the movie rating time, assuming that user preferences might change, some kind of time limited "fashion" may impact ratings etc.
+- try to somehow join together into groups movies that have similar titles (e.g. movies from the same 'series' should land in the same group). Then estimate some 'effect' for such groups, assuming that users would rate movies from same group or just movies from the same series similarly.
+- try to deeper analyze material in the course where fectoring was used, and maybe perform some factoring on snmaller data set and try to use it to improve prediction (this might be non-triviel bacause of computational complexity).
+- I was not very happy with results obtaned using rounding function that is based on calculation how frequently particular users give half star's ratings (I noticed that it is highly user-dependent) - the $\rho_u(r)$ function. It would be interesting to deeper investigate why this funtion in a way that I implemented it does not improve results that much (and is even worse than just rounding to full stars).
+- I noticed that the data that we worked with (_GroupLens research lab_ [@SourceData]) also contained a "movie tag" imformation. It was not extracted by corse official data prepration script, so probably cound not be used in official result, but for an extercise it would be worth to check if it could improve our predictions further.
+
+I belive that using some of those ideas might slightly improve result. Hovewer I noticed that adding more and more ingredients to the model improves the result to a lesser extent, as it can be seen on graph \@ref(fig:final-results).
+So it looks like there might be some limit for predicton acuracy coming from fact that actual user ratings is laden with some random effect and that we predict ratings for some new users that simply did not shown their preferences yet bacause they have rated too few movies.
+
+## Final words
+I would like to take opportunity and express my appreciation to all persons imvolved into preparation of this excelent "Data Scientists Proffesional" series of courses, espacially to _prof. Rafael A. Irizarry_ - the main author. I am also very grateful that this course and all materials have been made public.
+
+I have learned a lot. Gained also some hands-on experiance with R programming language which I did not known before.
+I like very much RStudio programming environment, but honestly I'm not very big fan of R language, espacially because of its strange 
+syntax, unclear type system, sometimes not clear help descriptions for packages, but mostly for slowness and one-thread approach.
+I'm also not satisfied from `bookdown` and `rmarkdown` packages. While HTML back-end seems to be usually correct, however PDF one is frequetly misplaced (e.g. tables or pictures are placed in wrong places on page, or table or picture titles are not printed, bibliography is hard to get dome right, etc).
+Looking forward I think I will be trying to use languages like Julia or Python for my next data science related learning efforts.
+In particular I'd like to learn more about Neural Networks.

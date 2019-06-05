@@ -1,0 +1,66 @@
+--- 
+title: "DS Capstone Report"
+author: "Grzegorz Wierzchowski"
+date: "Compiled: `r Sys.Date()`"
+site: bookdown::bookdown_site
+documentclass: book
+bibliography: [book.bib, packages.bib]
+biblio-style: apalike
+link-citations: yes
+description: "This is the Capstone Report used as the final thesis for HarvardX Data Science Series"
+---
+
+# Prerequisites
+
+The document is prepared in **R Markdown** language and should be compiled using the **bookdown** package. 
+This package can be installed from CRAN or Github:
+
+```{r eval=FALSE}
+install.packages("bookdown")
+# or the development version
+# devtools::install_github("rstudio/bookdown")
+```
+
+Source code for this document is available in GitHub repository: <https://github.com/gwierzchowski/>.
+Doucument with its source code is licensed under the [Creative Commons Attribution-NonCommercial-NoDerivs 3.0](http://creativecommons.org/licenses/by-nc-nd/3.0/) License.
+
+Included R code launches installation of necessary R packages during document build process if they are not already installed.
+But to start build process those components must be installed:
+
+- R base program (version 3.5 or higher)
+- R package `bookdown` (see instruction above)
+- R Studio IDE (recommended)
+
+To compile this document to PDF, you also need _LaTex_ with most commonly used packages.
+MS Windows users are recommended to install _TinyTeX_ (which includes _XeLaTeX_): <https://yihui.name/tinytex/>.
+Linux users can use _Texlive_ contained in repositories of most Linux distributions.
+Mac users - please refer to `bookdown` package and `pandoc` program instructions.
+
+In order to properly install several R packages, C compiler must be avaialble in the system (may require additional installation 
+on Windows systems) as well as some additional libraries or `-dev` packages may be required. Please refer to particular packages'
+documentation (or search the web) in case of problems.
+
+Instruction how to build PDF file from sources:
+
+- Download document sources from <https://github.com/gwierzchowski/>.
+- Open main project file: `Capstone.Rproj` with R Studio.
+- Open file: `_output.yml` and un-comment either: `latex_engine: xelatex` (on Windows) or 
+  `latex_engine: pdflatex` (on Linux).
+- Use **Build Book** option avaialble in **build** tab (on right upper panel in default R Studio layout).
+  Output document is stored in `_book` sub-folder of main project folder.
+
+Notes: 
+
+- Source repository contain the file `RData\genres_users_r.RData` which stores heavy calculations results, and is placed to reduce build time considerably. With this file, document build takes about 1h, without this file (in such case all calculations are performed) it may take even 9-10h.
+- The file: `02-exploration.Rmd` contains switch: `FirstTime <- TRUE`. Turn it to `FALSE` if you run this buld for the second time - to avoid already done download and extraction of data files.
+- I performed calculations on Linux system with memory: 16GB RAM.
+- Used R version: 3.6.0 with up-to-date packages as of May 2019.
+  
+Expected source format for the _Capstone Course_ is `.Rmd` file, so I provide such file as concatenation of all chapters (the build intemediate file). It can also be compiled directly, but to get full content with correct references I recommend above process that involves `bookdown` package.
+
+To keep document compact, I do not list all accompanied sorce code, only the most important parts. Full source code which is being run during this document build is avaialble in source files in: <https://github.com/gwierzchowski/>.
+
+```{r include=FALSE}
+# automatically create a bib database for R packages
+knitr::write_bib(c('bookdown', 'knitr', 'rmarkdown'), 'packages.bib')
+```

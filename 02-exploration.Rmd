@@ -19,7 +19,9 @@ There are two modifications in my data pre-processing procedures in compare to o
 ```{r load-libs, include=FALSE}
 knitr::opts_chunk$set(echo=FALSE)
 
-# Set following parameter to TRUE id you already downoaded data and extracted files (saves time).
+# Set following parameter to TRUE if you:
+# - already downoaded data and extracted files (saves time).
+# - installed required packages (see below list)
 # Verify folders.
 FirstTime <- FALSE
 

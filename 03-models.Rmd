@@ -666,6 +666,17 @@ Our model require a lot of calculation, so for performance reasons we will not u
 if (file.exists("RData/genres_users_r.RData")) {
   load("RData/genres_users_r.RData")
 } else {
+  # Ratings are splitted by generics.
+  # e.g. one record:
+  #  userId movieId rating timestamp            genres              year_class
+  #    1     185      5    838983525         Action|Crime|Thriller  late 90's
+  # 
+  # is being replaced with three records and placed into recordset rgens, e.g.:
+  #  userId movieId rating timestamp            gen                 year_class
+  #    1     185      5    838983525         Action                 late 90's
+  #    1     185      5    838983525         Crime                  late 90's
+  #    1     185      5    838983525         Thriller               late 90's
+  # Note that 'genres' refers to combined generics, while 'gen' is single generic.
   rgens <- bind_rows(lapply(generics, function(gen) {
      edx %>%
        filter(str_detect(genres, gen)) %>%
@@ -673,6 +684,7 @@ if (file.exists("RData/genres_users_r.RData")) {
   }))
   rgens <- rgens %>% mutate(gen = factor(gen))
   
+  # We group by user and gen and calculate average rating difference of current model and actual rating
   genres_avgs_r <- rgens %>%
     left_join(movie_avgs_r, by='movieId') %>%
     left_join(user_avgs_r, by='userId') %>%
@@ -680,17 +692,24 @@ if (file.exists("RData/genres_users_r.RData")) {
     mutate(b_ue = ifelse(is.na(b_ue), 0, b_ue)) %>%
     group_by(gen, userId) %>%
     summarize(b_ug = mean(rating - mu - b_i - b_u - b_ue))
+  
+  # Vector of unique combination of generics assocated to all movies
   genres <-
     movies %>%
     distinct(genres) %>%
     .$genres %>%
     unlist %>%
     unique
+  
+  # Vector of unique userIDs from validation set
   userId <-
     validation %>%
     distinct(userId) %>%
     .$userId %>%
     unlist
+  
+  # Function that for given genres and user will calculate the genres effect value
+  #  as average of genres_avgs_r$b_ug of all generics that are included in genres
   calc_bt_status <- 0
   calc_bt <- function(gen, u) {
     calc_bt_status <<- calc_bt_status + 1
@@ -704,10 +723,13 @@ if (file.exists("RData/genres_users_r.RData")) {
         .$b_ug
     )
   }
+  
+  # Creates data frame with all userID, combined generics (genres) combinations that are present in validation set
   genres_users_r <- 
     crossing(userId, genres) %>%
     semi_join(validation)
   
+  # Calculate genres effect (for validation set) by applying calc_bt() function to genres_users_r data set
   # WARNING: This is computation heavy procedure (average calculation time: 6h30')
   genres_users_r <- 
     mutate(genres_users_r, avg_b_ug = as.vector(by(genres_users_r, 1:nrow(genres_users_r), function(row) calc_bt(row$genres, row$userId))))
@@ -715,6 +737,10 @@ if (file.exists("RData/genres_users_r.RData")) {
     mutate(genres_users_r, avg_b_ug = ifelse(is.nan(avg_b_ug), 0, avg_b_ug))
   
   rm(rgens, genres_avgs_r, genres, userId, calc_bt_status, calc_bt)
+  
+  # NOTE: In those calculations we used validation data set, but not ratings from this set.
+  # So this does not break rules and do not lead to overfitting.
+  # Logically calculations that invollved validation set belongs to computation of predicted ratings phase (which by definition uses this set). 
 }
 
 predicted_ratings <- validation %>%

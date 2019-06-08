@@ -1,7 +1,7 @@
 # Models
 
 I this chapter I describe process of building and improving prediction models, starting from simplest ones to more advanced.
-Initially I will be following steps described in the course official book [@IrizarryBook], but later will try to use some results described in prevoius chapter and further modify model based on early results.
+Initially I will be following steps described in the course official book [@IrizarryBook], but later will try to use some results described in previous chapter and further modify model based on those early statistics.
 In this chapter, we will be using following symbols and abbreviations:
 
 - $U$ - set of all users contained in data set. Its element (i.e. particular user) will be denoted by $u$.
@@ -9,7 +9,7 @@ In this chapter, we will be using following symbols and abbreviations:
 - $T,\ V$ - we have divided entire data set into two distinct sets: training $T$ and validation $V$. Assuming that there may be only one (or none) rating of given movie by given user, we can define those sets as subbects of respective indexes pairs. 
 Following conditions are met:
 $$T\subsetneq U\times I,\ V\subsetneq U\times I,\ T\cap V = \emptyset$$
-- $Y_{u,i}$ - rating given by user $u$ for movie $i$. This synbol denotes random variable and is used only to describe models.
+- $Y_{u,i}$ - rating given by user $u$ for movie $i$. This symbol denotes random variable and is used only to describe models.
 - $y_{u,i}$ - observed rating given by user $u$ for movie $i$ ($(u, i) \in T\cup V$).
 - $\epsilon_{u,i}$ - random fluctuation - random variable with small variance and centered around zero. This symbol only appears in model description. In actual preditions we replace it with its expected value, which is 0.
 - $\rho_1(), \rho_2(), \rho_{u}()$ - ratings' rounding functions (to full-star or half-star).
@@ -75,7 +75,7 @@ The bullet sign means that we will be trying several rounding functions.
 ### Rounding functions
 At first we will check model without any rounding, so: 
 $$\rho_0(r) = r$$
-Then we will check most obvoius rounding strategy i.e. to round calculated rating prediction to nearest allowed value - i.e. the value from set ${0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5}$. Let's call it $\rho_1$. Respective R code:
+Then we will check most obvious rounding strategy i.e. to round calculated rating prediction to nearest allowed value - i.e. the value from set ${0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5}$. Let's call it $\rho_1$. Respective R code:
 ```{r, echo=TRUE}
 rho1 <- function(rating) {
   round(rating * 2) / 2
@@ -144,7 +144,7 @@ Results are interesting. It looks like trying to optimize RMSE is in contradicti
 It may also mean that maybe applied rounding functions are still not ideal. I will try to improve rounding function further in next models.
 
 ### Summary
-We will add two models from prevoius section to our results list - those which the best optimize RMSE and ACCU.
+We will add two models from previous section to our results list - those which the best optimize RMSE and ACCU.
 ```{r}
 results <- rbind(results, data.frame(Method = "+ Movie effect (no rounding)", RMSE = res_movie[1,1], ACCU = res_movie[1,2]))
 results <- rbind(results, data.frame(Method = "+ Movie effect (rounding rho2)", RMSE = res_movie[3,1], ACCU = res_movie[3,2]))
@@ -156,16 +156,16 @@ rm(raw_predicted_ratings, rho1_predicted_ratings, rho2_predicted_ratings, rho3_p
 Note that for models without rounding accuracy measure does not make sense because by definition it will be very low.
 
 ## User effect
-Some users may be more demanding than others, and some may just like almost every movie or be very polite while rating. Also the mental maening of particular grade may be different (i.e. four stars for some may be high rate while for others just avarage). We will try to consider this factor now.
+Some users may be more demanding than others, and some may just like almost every movie or be very polite while rating. Also the mental meaning of particular grade may be different (i.e. four stars for some may be high rate while for others just avarage). We will try to consider this factor now.
 $$Y_{u,i} = \rho_\bullet(\mu + b_i + b_u + \epsilon_{u,i})$$
 
 where new factor: $b_u$ is user effect - in similar way like movie effect in last section.
 
 ### Rounding functions
 Beside general level of rating there is also one more factor which is very user specific. It is user's inclination for giving
-half-star's ratings. Some peple are perfoectionists and like do the things with highest precision - those will more likely will give more precise grades (i.e. fraction grades), whole other may not care that much or just see half-strs as not estetic 
-thing - those very rarely or just never wil give fraction rates. This ssms to be strongly confirmed on graph \@ref(fig:half-stars-analysis) where users are more-less grouped into those never giving fractions rates and those using fraction rates with frequency close to 50%. So it makes sense to use different rounding function for those two groups.
-So we will modify slightly our prevoius rounding function:
+half-star's ratings. Some peple are perfoectionists and like doing the things with highest precision - those will more likely will give more precise grades (i.e. fraction grades), whole other may not care that much or just see half-strs as not aesthetic 
+thing - those very rarely or just never wil give fraction rates. This seems to be strongly confirmed on graph \@ref(fig:half-stars-analysis) where users are more-less grouped into those never giving fractions rates and those using fraction rates with frequency close to 50%. So it makes sense to use different rounding function for those two groups.
+So we will modify slightly our previous rounding function:
 $$\rho_u(r) = 
   \begin{cases}
   \rho_1(r)& \text{if}\ |r-\rho_1(r)| < \tau(u) / 2 \\
@@ -198,7 +198,7 @@ rm(rfrac_counts)
 Note: This code was given only for ilustration. Using such defined `rho_u` would be very unefficient bacause of nested filtering. While calculating predistion we will left-join `thres_halfs_by_user` frame to validation set instead and then calcute rounded value - what will give equivalent result.
 
 ### Predictions
-As user effect factor we will take average of difference of ratings from predictions of our prevoius model (including movie effect) taken by movies for given user: 
+As user effect factor we will take average of difference of ratings from predictions of our previous model (including movie effect) taken by movies for given user: 
 $$b_u = \text{Avg}_{\{i:\ (u,i)\in T\}}(y_{u,i} - (\mu + b_i))$$
 ```{r user-effect, include=FALSE}
 rho_u <- function(rating, thres_by_user) {
@@ -242,11 +242,11 @@ Following table list measures of predictions calculated according our model with
 
   : User effect with applied different rounding functions.
 
-Results generally improved but are suprising I expected that $\rho_u$ should be pretty good now, but it's RMSE is second to worst 
+Results generally improved but are surprising. I expected that $\rho_u$ should be pretty good now, but it's RMSE is second to worst 
 and accuracy is still worse that $\rho_2$. I wonder if there is still some fundamental, not accounted factor.
 
 ### Summary
-Like recently we will add two models from prevoius section to our results list - those which the best optimize RMSE and ACCU.
+Like recently we will add two models from previous section to our results list - those which the best optimize RMSE and ACCU.
 ```{r}
 results <- rbind(results, data.frame(Method = "+ User effect (no rounding)", RMSE = res_user[1,1], ACCU = res_user[1,2]))
 results <- rbind(results, data.frame(Method = "+ User effect (rounding rho2)", RMSE = res_user[3,1], ACCU = res_user[3,2]))
@@ -258,7 +258,7 @@ Note that for models without rounding accuracy measure does not make sense becau
 
 ## Year of production effect
 Results shown in section \@ref(by-year-users-stat) 
-seems to suggest that movie year of production may have any impact on ratings given by some users. So let's check if adding this factor to our model will improve it.
+seems to suggest that movie year of production may have some impact on ratings given by users. So let's check if adding this factor to our model will improve it.
 $$Y_{u,i} = \rho_\bullet(\mu + b_i + b_u + b_{u,e} + \epsilon_{u,i})$$
 where $b_{u,e}$ is year's (epoch's) efect calculated per given user from his/her ratings of movies that were produced in similar time frame that movie whose rating is being predicted.
 We will calculate it as average of those ratings:
@@ -313,7 +313,7 @@ Following table list measures of predictions calculated according our model with
 
   : Epoch effect with applied different rounding functions.
 
-To my surprise RMSE measures degradated a bit, while Acuracy little imroved. It looks like ading movie year of production to model introduced more noise to predictions and are not very helpfull. I suppose that it was because many users have rated very few or just single movies from given epoch, and this influenced too much on prediction model. To quickly check that (without making heavy computations) I decided to try cutting-off (bring down to zero) movie epoch parameter in case user rated less than 10 movies from given epoch.
+To my surprise RMSE measures degradated a bit, while Acuracy little imroved. It looks like ading movie year of production to model introduced more noise to predictions and is not very helpfull. I suppose that it was because many users have rated very few or just single movies from given epoch, and this influenced too much on prediction model. To quickly check that (without making heavy computations) I decided to try cutting-off (bring down to zero) movie epoch parameter in case user rated less than 10 movies from given epoch.
 
 Here is the code of this transformation (see last mutate instruction):
 ```{r epoch-by-user-effect1-test, echo=TRUE}
@@ -360,7 +360,7 @@ rm (movie_avgs, user_avgs, epoch_by_user_avgs, epoch_by_user_avgs_test)
 | $\rho_3$  | `r res_epoch_test[4,1]` | `r res_epoch_test[4,2]` |
 | $\rho_u$  | `r res_epoch_test[5,1]` | `r res_epoch_test[5,2]` |
 
-This time RMSE measures have improved and are also better than those without date of movie production effect. It means that movie production date may be a meaningfull factor but needs to be regularized. This case shows that regularization may be in general important process. So I decided to reimplement all prevoius models, but this time performing regularization instead of taking just means.
+This time RMSE measures have improved and are also better than those without date of movie production effect. It means that movie production date may be a meaningfull factor but needs to be regularized. This case shows that regularization may be in general important process. So I decided to reimplement all previous models, but this time performing regularization instead of taking just means.
 
 ## Regularization
 Regularization means that we want our movie, user or year effects to be less affected by potential random fluctuations.

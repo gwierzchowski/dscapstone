@@ -35,7 +35,6 @@ Before I started working on problem I had following rough plan.
    movie genres and movie year of issue (embedded in most movie titles).
 3. Than, to check if regularization and introducing panalties shrinking less popular moviews to average would have
    any positive effect.
-4. Then, would see if more advanced technics like matrix factoirization could be applied to our problem. I suspect that there could be
-   performance of memory problems with such relativly big data set, whole working on personal PC.
+4. Then, would see if more advanced technics like matrix factoirization could be applied to our problem. However I suspect that there could be performance or memory problems with such relativly big data set, while working on personal PC.
 5. Then some internet based research could be done to check if there are some other approaches which could be applied to current problem.
 

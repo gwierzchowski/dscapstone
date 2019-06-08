@@ -218,8 +218,8 @@ gen_stat %>%
 This chart shows that mean ratings in each category (espacially those more popular) does not differ that much from total mean,
 and also that variability within each generics is pretty much the same.
 
-This little surpriced me bacause I expected that assigned rating is more related to generics (kind of movie).
-However after I thought a little, I realized that this was my auto-suggestion. I.e. I, most probably subconsciously expected that people (generally ?!?) like kind of movies that I personally like. 
+This little surpriced me because I expected that assigned rating is more related to generics (kind of movie).
+However after I thought a little, I realized that this was my auto-suggestion. I.e. I, most probably subconsciously expected that people (generally ?!?) do like kind of movies that I personally like. 
 But people are different and like different films. Otherwise it could happen that some movie catagories would dominate industry. Kind of interesting discovery. 
 The other observation is that some kind of movies are in average higher rated that others, but are in the same time relatively rare - what could maybe be some pointer for producers.
 The last thing which is little strange are the extremas: "Film-Noir" - highest rated and "Horror" - lowest rated, while they are in my humble opinion a little bit similar in its nature. So there may be some different factor which influance the rating.
@@ -414,7 +414,7 @@ Red line marks total half-star frequency.
 This chart shows that users are divided into two separate groups:
 
 - those who never use half stars
-- those who give half-star ratings with randon (close to 0.5) frequency
+- those who give half-star ratings with random (close to 0.5) frequency
 
 This is interesting observation and can highly improve prediction acuracy of our model.
 
